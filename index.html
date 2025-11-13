@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>WebRTC P2P с WebSocket и диагностикой</title>
+<title>WebRTC через LatteStream</title>
 <style>
   body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 20px; }
   video { width: 45%; margin: 10px; border: 1px solid black; }
@@ -12,94 +12,95 @@
 </head>
 <body>
 
-<h2>Видеозвонок через WebSocket</h2>
+<h2>Видеозвонок через LatteStream сигнализацию</h2>
 
 <video id="localVideo" autoplay muted playsinline></video>
 <video id="remoteVideo" autoplay playsinline></video>
 
 <button id="startBtn">Начать звонок</button>
 
-<div id="diagnostics">Диагностическая информация будет здесь...</div>
+<div id="diagnostics">Диагностическая информация будет здесь…</div>
 
 <script>
-const WS_SERVER = "wss://demo.piesocket.com/v3/channel_1?api_key=demo";
-const ws = new WebSocket(WS_SERVER);
+  // Public Key LatteStream
+  const APP_KEY = "lspk_Z2w6ZjViZWE5MTUtZjAxZC00ZDcxLTllZGEtMDA2ZTFlNDBkODU1OjI1ZmEwNWUyLTY4ZWQtNGVjYi04ZDJmLTY1NTU2YTExOTIzZA";
+  const CHANNEL = "webrtc-channel"; // Можно любое имя, одинаковое на обоих устройствах
+  const WS_SERVER = `wss://ws.lattestream.com/app/${APP_KEY}`;
 
-const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-const localVideo = document.getElementById("localVideo");
-const remoteVideo = document.getElementById("remoteVideo");
-const startBtn = document.getElementById("startBtn");
-const diagnostics = document.getElementById("diagnostics");
+  const ws = new WebSocket(WS_SERVER);
+  const pc = new RTCPeerConnection({ iceServers: [{ urls:"stun:stun.l.google.com:19302" }] });
+  const localVideo = document.getElementById("localVideo");
+  const remoteVideo = document.getElementById("remoteVideo");
+  const startBtn = document.getElementById("startBtn");
+  const diagnostics = document.getElementById("diagnostics");
 
-function log(msg) {
-  const time = new Date().toLocaleTimeString();
-  diagnostics.textContent += `[${time}] ${msg}\n`;
-  diagnostics.scrollTop = diagnostics.scrollHeight;
-}
-
-let localStream;
-
-// Отображение удаленного потока
-pc.ontrack = event => { 
-  remoteVideo.srcObject = event.streams[0]; 
-  log("Удаленный поток получен."); 
-};
-
-// Отправка ICE-кандидатов через WebSocket
-pc.onicecandidate = event => {
-  if(event.candidate){
-    ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
-    log("Отправлен ICE-кандидат: " + JSON.stringify(event.candidate));
+  function log(msg){
+    const time = new Date().toLocaleTimeString();
+    diagnostics.textContent += `[${time}] ${msg}\n`;
+    diagnostics.scrollTop = diagnostics.scrollHeight;
   }
-};
 
-// WebSocket обработка сообщений
-ws.onopen = () => log("WebSocket соединение открыто.");
-ws.onclose = () => log("WebSocket соединение закрыто.");
-ws.onerror = e => log("WebSocket ошибка: " + e);
+  let localStream;
 
-ws.onmessage = async (msg) => {
-  const data = JSON.parse(msg.data);
-  log("Получено сообщение: " + JSON.stringify(data));
-  try {
-    if(data.type === "offer"){
-      log("Обработка оффера...");
-      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      ws.send(JSON.stringify({ type: "answer", answer }));
-      log("Отправлен ответ.");
-    } else if(data.type === "answer"){
-      log("Обработка ответа...");
-      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-    } else if(data.type === "candidate"){
-      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      log("Добавлен ICE-кандидат: " + JSON.stringify(data.candidate));
+  pc.ontrack = event => {
+    remoteVideo.srcObject = event.streams[0];
+    log("Удалённый поток получен.");
+  };
+
+  pc.onicecandidate = event => {
+    if(event.candidate){
+      const msg = { channel: CHANNEL, type:"candidate", candidate:event.candidate };
+      ws.send(JSON.stringify(msg));
+      log("Отправлен ICE‑кандидат: " + JSON.stringify(event.candidate));
     }
-  } catch(e){
-    log("Ошибка при обработке сообщения: " + e);
-  }
-};
+  };
 
-// Запуск камеры и звонка
-startBtn.onclick = async () => {
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    localVideo.srcObject = localStream;
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    log("Камера и микрофон подключены.");
+  ws.onopen = () => log("WebSocket соединение открыто.");
+  ws.onclose = () => log("WebSocket соединение закрыто.");
+  ws.onerror = e => log("WebSocket ошибка: " + e);
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    ws.send(JSON.stringify({ type: "offer", offer }));
-    log("Оффер создан и отправлен.");
+  ws.onmessage = async event => {
+    const data = JSON.parse(event.data);
+    log("Получено сообщение: " + JSON.stringify(data));
+    try{
+      if(data.channel !== CHANNEL) return; // Игнорируем чужие каналы
+      if(data.type === "offer"){
+        log("Обработка оффера...");
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ channel: CHANNEL, type:"answer", answer }));
+        log("Ответ создан и отправлен.");
+      } else if(data.type === "answer"){
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        log("Ответ установлен.");
+      } else if(data.type === "candidate"){
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        log("Добавлен ICE‑кандидат: " + JSON.stringify(data.candidate));
+      }
+    } catch(e){
+      log("Ошибка обработки сообщения: " + e);
+    }
+  };
 
-    startBtn.disabled = true;
-    startBtn.textContent = "Звонок активен";
-  } catch(e){
-    log("Ошибка доступа к камере/микрофону: " + e);
-  }
-};
+  startBtn.onclick = async () => {
+    try{
+      localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+      localVideo.srcObject = localStream;
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      log("Камера и микрофон подключены.");
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ channel: CHANNEL, type:"offer", offer }));
+      log("Оффер создан и отправлен.");
+
+      startBtn.disabled = true;
+      startBtn.textContent = "Звонок активен";
+    } catch(e){
+      log("Ошибка доступа к камере/микрофону: " + e);
+    }
+  };
 </script>
 
 </body>
