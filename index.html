@@ -7,12 +7,15 @@
   body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 20px; }
   video { width: 45%; margin: 10px; border: 1px solid black; }
   button { margin: 5px; padding: 10px 20px; font-size: 16px; }
-  #diagnostics { width: 90%; height: 200px; border: 1px solid #ccc; overflow-y: auto; white-space: pre-wrap; background: #f7f7f7; padding: 10px; font-family: monospace; }
+  #diagnostics { width: 95%; height: 300px; border: 1px solid #ccc; overflow-y: auto; white-space: pre-wrap; background: #f7f7f7; padding: 10px; font-family: monospace; }
+  .success { color: green; }
+  .error { color: red; }
+  .info { color: blue; }
 </style>
 </head>
 <body>
 
-<h2>Видеозвонок через LatteStream сигнализацию</h2>
+<h2>WebRTC через LatteStream сигнализацию</h2>
 
 <video id="localVideo" autoplay muted playsinline></video>
 <video id="remoteVideo" autoplay playsinline></video>
@@ -22,10 +25,10 @@
 <div id="diagnostics">Диагностическая информация будет здесь…</div>
 
 <script>
-  // Public Key LatteStream
+  // Public Key и канал LatteStream
   const APP_KEY = "lspk_Z2w6ZjViZWE5MTUtZjAxZC00ZDcxLTllZGEtMDA2ZTFlNDBkODU1OjI1ZmEwNWUyLTY4ZWQtNGVjYi04ZDJmLTY1NTU2YTExOTIzZA";
-  const CHANNEL = "webrtc-channel"; // Можно любое имя, одинаковое на обоих устройствах
-  const WS_SERVER = `wss://ws.lattestream.com/app/${APP_KEY}`;
+  const CHANNEL = "webrtc-channel"; // одинаковое имя на обоих устройствах
+  const WS_SERVER = `wss://ws.lattestream.com/?appKey=${APP_KEY}&channel=${CHANNEL}`;
 
   const ws = new WebSocket(WS_SERVER);
   const pc = new RTCPeerConnection({ iceServers: [{ urls:"stun:stun.l.google.com:19302" }] });
@@ -34,9 +37,9 @@
   const startBtn = document.getElementById("startBtn");
   const diagnostics = document.getElementById("diagnostics");
 
-  function log(msg){
+  function log(msg, type="info") {
     const time = new Date().toLocaleTimeString();
-    diagnostics.textContent += `[${time}] ${msg}\n`;
+    diagnostics.innerHTML += `<span class="${type}">[${time}] ${msg}</span>\n`;
     diagnostics.scrollTop = diagnostics.scrollHeight;
   }
 
@@ -44,63 +47,69 @@
 
   pc.ontrack = event => {
     remoteVideo.srcObject = event.streams[0];
-    log("Удалённый поток получен.");
+    log("Удалённый поток получен.", "success");
   };
 
   pc.onicecandidate = event => {
     if(event.candidate){
-      const msg = { channel: CHANNEL, type:"candidate", candidate:event.candidate };
+      const msg = { type:"candidate", candidate:event.candidate };
       ws.send(JSON.stringify(msg));
-      log("Отправлен ICE‑кандидат: " + JSON.stringify(event.candidate));
+      log("Отправлен ICE‑кандидат: " + JSON.stringify(event.candidate), "info");
+    } else {
+      log("Все ICE-кандидаты отправлены.", "info");
     }
   };
 
-  ws.onopen = () => log("WebSocket соединение открыто.");
-  ws.onclose = () => log("WebSocket соединение закрыто.");
-  ws.onerror = e => log("WebSocket ошибка: " + e);
+  ws.onopen = () => log("WebSocket соединение открыто.", "success");
+  ws.onclose = () => log("WebSocket соединение закрыто.", "error");
+  ws.onerror = e => log("WebSocket ошибка: " + e, "error");
 
   ws.onmessage = async event => {
-    const data = JSON.parse(event.data);
-    log("Получено сообщение: " + JSON.stringify(data));
-    try{
-      if(data.channel !== CHANNEL) return; // Игнорируем чужие каналы
+    try {
+      const data = JSON.parse(event.data);
+      log("Получено сообщение: " + JSON.stringify(data), "info");
+
       if(data.type === "offer"){
-        log("Обработка оффера...");
+        log("Обработка оффера...", "info");
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ channel: CHANNEL, type:"answer", answer }));
-        log("Ответ создан и отправлен.");
+        ws.send(JSON.stringify({ type:"answer", answer }));
+        log("Ответ создан и отправлен.", "success");
       } else if(data.type === "answer"){
         await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        log("Ответ установлен.");
+        log("Ответ установлен.", "success");
       } else if(data.type === "candidate"){
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        log("Добавлен ICE‑кандидат: " + JSON.stringify(data.candidate));
+        log("Добавлен ICE‑кандидат: " + JSON.stringify(data.candidate), "info");
       }
     } catch(e){
-      log("Ошибка обработки сообщения: " + e);
+      log("Ошибка обработки сообщения: " + e, "error");
     }
   };
 
   startBtn.onclick = async () => {
-    try{
+    try {
       localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
       localVideo.srcObject = localStream;
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      log("Камера и микрофон подключены.");
+      log("Камера и микрофон подключены.", "success");
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ channel: CHANNEL, type:"offer", offer }));
-      log("Оффер создан и отправлен.");
+      ws.send(JSON.stringify({ type:"offer", offer }));
+      log("Оффер создан и отправлен.", "success");
 
       startBtn.disabled = true;
       startBtn.textContent = "Звонок активен";
-    } catch(e){
-      log("Ошибка доступа к камере/микрофону: " + e);
+    } catch(e) {
+      log("Ошибка доступа к камере/микрофону: " + e, "error");
     }
   };
+
+  // Дополнительно: отслеживаем состояние соединения
+  pc.onconnectionstatechange = () => log("Состояние соединения: " + pc.connectionState, "info");
+  pc.onsignalingstatechange = () => log("Состояние сигнализации: " + pc.signalingState, "info");
 </script>
 
 </body>
