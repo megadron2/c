@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>LatteStream WebRTC Diagnostic 111</title>
+<title>LatteStream WebRTC Diagnostic 222</title>
 <style>
   video { width: 45%; margin: 5px; background: black; }
   #log { white-space: pre-wrap; background: #222; color: #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -24,7 +24,7 @@ function log(msg, type="info") {
 
 // Настройки LatteStream
 const PUBLIC_KEY = "lspk_Z2w6ZjViZWE5MTUtZjAxZC00ZDcxLTllZGEtMDA2ZTFlNDBkODU1OjI1ZmEwNWUyLTY4ZWQtNGVjYi04ZDJmLTY1NTU2YTExOTIzZA";
-const CHANNEL = "webrtc-channel";
+const CHANNEL = "room";
 const WSS_URL = `wss://ws.lattestream.com/?appKey=${PUBLIC_KEY}&channel=${CHANNEL}`;
 
 log(`Проверяем WSS URL: ${WSS_URL}`);
@@ -130,3 +130,4 @@ pc.ontrack = (event) => {
 </script>
 </body>
 </html>
+
