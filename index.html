@@ -9,7 +9,7 @@
 </style>
 </head>
 <body>
-<h2>Видеозвонок через LatteStream сигнализацию 222</h2>
+<h2>Видеозвонок через LatteStream сигнализацию 333</h2>
 <video id="localVideo" autoplay muted></video>
 <video id="remoteVideo" autoplay></video>
 <div id="log">Диагностическая информация будет здесь…</div>
@@ -24,11 +24,11 @@ function log(msg, type="info") {
 
 // Настройки LatteStream
 const PUBLIC_KEY = "lspk_Z2w6ZjViZWE5MTUtZjAxZC00ZDcxLTllZGEtMDA2ZTFlNDBkODU1OjI1ZmEwNWUyLTY4ZWQtNGVjYi04ZDJmLTY1NTU2YTExOTIzZA";
-const CHANNEL = "webrtc-channel";  // Название канала
+const CHANNEL = "webrtc-channel";
 const WSS_URL = `wss://ws.lattestream.com/?appKey=${PUBLIC_KEY}&channel=${CHANNEL}`;
 
-// Проверка URL соединения
 log(`Проверяем WSS URL: ${WSS_URL}`);
+
 let ws;
 try {
     ws = new WebSocket(WSS_URL);
@@ -39,7 +39,6 @@ try {
 ws.onopen = () => log("WebSocket соединение открыто");
 ws.onerror = (e) => log(`WebSocket ошибка: type=${e.type}, isTrusted=${e.isTrusted}`, "error");
 ws.onclose = (e) => log(`WebSocket закрыт. Код: ${e.code}, причина: ${e.reason}, wasClean: ${e.wasClean}`, "error");
-ws.onmessage = (msg) => log(`Получено сообщение: ${msg.data}`);
 
 // WebRTC
 const pc = new RTCPeerConnection({
@@ -49,7 +48,11 @@ const pc = new RTCPeerConnection({
 pc.onicecandidate = (event) => {
     if (event.candidate) {
         log(`Отправлен ICE-кандидат: ${JSON.stringify(event.candidate)}`);
-        ws.send(JSON.stringify({type: 'ice', candidate: event.candidate}));
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({type: 'ice', candidate: event.candidate}));
+        } else {
+            log("WebSocket не открыт, ICE-кандидат не отправлен.", "warn");
+        }
     } else {
         log("Все ICE-кандидаты отправлены.");
     }
@@ -82,16 +85,31 @@ async function createOffer() {
     }
 }
 
-// Принятие сообщений от сигнального сервера
+// Единый обработчик сообщений
 ws.onmessage = async (event) => {
     log(`Получено сообщение: ${event.data}`);
-    const data = JSON.parse(event.data);
-    if(data.type === 'answer') {
-        await pc.setRemoteDescription({type: 'answer', sdp: data.sdp});
-        log("Ответ установлен как удаленное описание.");
-    } else if(data.type === 'ice') {
-        await pc.addIceCandidate(data.candidate);
-        log(`ICE-кандидат добавлен: ${JSON.stringify(data.candidate)}`);
+    try {
+        const data = JSON.parse(event.data);
+        if(data.type === 'offer') {
+            log("Получен оффер, создаем ответ...");
+            await pc.setRemoteDescription({type: 'offer', sdp: data.sdp});
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            if(ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'answer', sdp: answer.sdp}));
+                log("Ответ отправлен.");
+            } else {
+                log("WebSocket не открыт, ответ не отправлен.", "error");
+            }
+        } else if(data.type === 'answer') {
+            await pc.setRemoteDescription({type: 'answer', sdp: data.sdp});
+            log("Ответ установлен как удаленное описание.");
+        } else if(data.type === 'ice') {
+            await pc.addIceCandidate(data.candidate);
+            log(`ICE-кандидат добавлен: ${JSON.stringify(data.candidate)}`);
+        }
+    } catch(e) {
+        log(`Ошибка при обработке сообщения: ${e.message}`, "error");
     }
 };
 
