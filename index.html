@@ -30,12 +30,10 @@
   const CHANNEL = "webrtc-channel"; // одинаковое имя на обоих устройствах
   const WS_SERVER = `wss://ws.lattestream.com/?appKey=${APP_KEY}&channel=${CHANNEL}`;
 
-  const ws = new WebSocket(WS_SERVER);
-  const pc = new RTCPeerConnection({ iceServers: [{ urls:"stun:stun.l.google.com:19302" }] });
+  const diagnostics = document.getElementById("diagnostics");
   const localVideo = document.getElementById("localVideo");
   const remoteVideo = document.getElementById("remoteVideo");
   const startBtn = document.getElementById("startBtn");
-  const diagnostics = document.getElementById("diagnostics");
 
   function log(msg, type="info") {
     const time = new Date().toLocaleTimeString();
@@ -44,6 +42,7 @@
   }
 
   let localStream;
+  const pc = new RTCPeerConnection({ iceServers: [{ urls:"stun:stun.l.google.com:19302" }] });
 
   pc.ontrack = event => {
     remoteVideo.srcObject = event.streams[0];
@@ -60,9 +59,16 @@
     }
   };
 
+  pc.onconnectionstatechange = () => log("Состояние соединения: " + pc.connectionState, "info");
+  pc.onsignalingstatechange = () => log("Состояние сигнализации: " + pc.signalingState, "info");
+
+  const ws = new WebSocket(WS_SERVER);
+
   ws.onopen = () => log("WebSocket соединение открыто.", "success");
-  ws.onclose = () => log("WebSocket соединение закрыто.", "error");
-  ws.onerror = e => log("WebSocket ошибка: " + e, "error");
+
+  ws.onclose = e => log(`WebSocket соединение закрыто. Код: ${e.code}, причина: ${e.reason}`, "error");
+
+  ws.onerror = e => log("WebSocket ошибка: " + JSON.stringify(e), "error");
 
   ws.onmessage = async event => {
     try {
@@ -106,10 +112,6 @@
       log("Ошибка доступа к камере/микрофону: " + e, "error");
     }
   };
-
-  // Дополнительно: отслеживаем состояние соединения
-  pc.onconnectionstatechange = () => log("Состояние соединения: " + pc.connectionState, "info");
-  pc.onsignalingstatechange = () => log("Состояние сигнализации: " + pc.signalingState, "info");
 </script>
 
 </body>
