@@ -1,133 +1,64 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>LatteStream WebRTC Diagnostic 222</title>
-<style>
-  video { width: 45%; margin: 5px; background: black; }
-  #log { white-space: pre-wrap; background: #222; color: #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily.co WebRTC Demo</title>
+  <style>
+    video { width: 45%; margin: 5px; background: black; }
+    button { font-size: 18px; padding: 10px 20px; margin: 10px; }
+    body { text-align: center; }
+  </style>
 </head>
 <body>
-<h2>Видеозвонок через LatteStream сигнализацию</h2>
-<video id="localVideo" autoplay muted></video>
-<video id="remoteVideo" autoplay></video>
-<div id="log">Диагностическая информация будет здесь…</div>
+  <h2>Видеозвонок через Daily.co</h2>
+  <video id="local" autoplay muted></video>
+  <video id="remote" autoplay></video>
+  <br>
+  <button onclick="join()">Присоединиться к звонку</button>
+  <button onclick="leave()">Покинуть звонок</button>
 
-<script>
-const logDiv = document.getElementById('log');
-function log(msg, type="info") {
-    const time = new Date().toLocaleTimeString();
-    logDiv.textContent += `[${time}] ${msg}\n`;
-    logDiv.scrollTop = logDiv.scrollHeight;
-}
+  <script src="https://unpkg.com/@daily-co/daily-js"></script>
+  <script>
+    let callObject;
 
-// Настройки LatteStream
-const PUBLIC_KEY = "lspk_Z2w6ZjViZWE5MTUtZjAxZC00ZDcxLTllZGEtMDA2ZTFlNDBkODU1OjI1ZmEwNWUyLTY4ZWQtNGVjYi04ZDJmLTY1NTU2YTExOTIzZA";
-const CHANNEL = "room";
-const WSS_URL = `wss://ws.lattestream.com/?appKey=${PUBLIC_KEY}&channel=${CHANNEL}`;
+    async function join() {
+      // Инициализируем callObject
+      callObject = window.DailyIframe.createFrame({
+        iframeStyle: {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 10000
+        },
+        showLeaveButton: true
+      });
 
-log(`Проверяем WSS URL: ${WSS_URL}`);
+      // Подписываемся на события
+      callObject.on('participant-joined', (e) => {
+        if (e.participant.local) return;
+        const remote = document.getElementById('remote');
+        callObject.setVideoTrack(e.participant.video, remote);
+      });
 
-let ws;
-try {
-    ws = new WebSocket(WSS_URL);
-} catch(e) {
-    log(`Ошибка при создании WebSocket: ${e}`, "error");
-}
+      callObject.on('participant-left', () => {
+        document.getElementById('remote').srcObject = null;
+      });
 
-ws.onopen = () => log("WebSocket соединение открыто");
-ws.onerror = (e) => log(`WebSocket ошибка: type=${e.type}, isTrusted=${e.isTrusted}`, "error");
-ws.onclose = (e) => log(`WebSocket закрыт. Код: ${e.code}, причина: ${e.reason}, wasClean: ${e.wasClean}`, "error");
-
-// WebRTC
-const pc = new RTCPeerConnection({
-    iceServers: [{urls: "stun:stun.l.google.com:19302"}]
-});
-
-pc.onicecandidate = (event) => {
-    if (event.candidate) {
-        log(`Отправлен ICE-кандидат: ${JSON.stringify(event.candidate)}`);
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({type: 'ice', candidate: event.candidate}));
-        } else {
-            log("WebSocket не открыт, ICE-кандидат не отправлен.", "warn");
-        }
-    } else {
-        log("Все ICE-кандидаты отправлены.");
+      // Присоединяемся к комнате
+      await callObject.join({ url: 'https://drdrdr.daily.co/drdrdr' });
+      console.log('Присоединились к комнате');
     }
-};
 
-pc.onconnectionstatechange = () => log(`Состояние соединения: ${pc.connectionState}`);
-pc.oniceconnectionstatechange = () => log(`Состояние ICE: ${pc.iceConnectionState}`);
-
-const localVideo = document.getElementById('localVideo');
-const remoteVideo = document.getElementById('remoteVideo');
-
-// Получаем медиа
-navigator.mediaDevices.getUserMedia({video: true, audio: true})
-.then(stream => {
-    localVideo.srcObject = stream;
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    log("Камера и микрофон подключены.");
-    
-    // Ждем открытия WebSocket перед отправкой оффера
-    if (ws.readyState === WebSocket.OPEN) {
-        createOffer();
-    } else {
-        log("Ждем открытия WebSocket перед отправкой оффера...");
-        ws.onopen = () => {
-            log("WebSocket соединение открыто");
-            createOffer();
-        };
+    function leave() {
+      if (callObject) {
+        callObject.leave();
+        callObject.destroy();
+        callObject = null;
+      }
     }
-}).catch(err => log(`Ошибка доступа к медиа: ${err}`, "error"));
-
-async function createOffer() {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    log("Оффер создан и установлен локально.");
-    if(ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({type: 'offer', sdp: offer.sdp}));
-        log("Оффер отправлен через сигнализацию.");
-    } else {
-        log("WebSocket не открыт, оффер не отправлен.", "error");
-    }
-}
-
-// Единый обработчик сообщений
-ws.onmessage = async (event) => {
-    log(`Получено сообщение: ${event.data}`);
-    try {
-        const data = JSON.parse(event.data);
-        if(data.type === 'offer') {
-            log("Получен оффер, создаем ответ...");
-            await pc.setRemoteDescription({type: 'offer', sdp: data.sdp});
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            if(ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({type: 'answer', sdp: answer.sdp}));
-                log("Ответ отправлен.");
-            } else {
-                log("WebSocket не открыт, ответ не отправлен.", "error");
-            }
-        } else if(data.type === 'answer') {
-            await pc.setRemoteDescription({type: 'answer', sdp: data.sdp});
-            log("Ответ установлен как удаленное описание.");
-        } else if(data.type === 'ice') {
-            await pc.addIceCandidate(data.candidate);
-            log(`ICE-кандидат добавлен: ${JSON.stringify(data.candidate)}`);
-        }
-    } catch(e) {
-        log(`Ошибка при обработке сообщения: ${e.message}`, "error");
-    }
-};
-
-pc.ontrack = (event) => {
-    remoteVideo.srcObject = event.streams[0];
-    log("Удаленное видео подключено.");
-};
-</script>
+  </script>
 </body>
 </html>
-
